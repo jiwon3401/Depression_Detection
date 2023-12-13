@@ -1,7 +1,125 @@
-'''
-DataLoader for training
-'''
+#DataLoader for training
 
+
+import glob, numpy, os, random, soundfile, torch
+from scipy import signal
+
+
+class train_loader(object):
+	def __init__(self, train_list, num_frames, rir_path, **kwargs):
+		#self.train_path = train_path
+		self.num_frames = num_frames
+        
+		# Load and configure augmentation files    
+		self.rir_files  = glob.glob(os.path.join(rir_path,'*/*/*.wav'))
+        
+		# Load data & labels
+		self.data_list  = []
+		self.data_label = []
+		lines = open(train_list).read().splitlines()[1:] # Header line 제외
+		# dictkeys = list(set([x.split()[0] for x in lines]))
+		# dictkeys.sort()
+		# dictkeys = { key : ii for ii, key in enumerate(dictkeys) }
+        
+		for index, line in enumerate(lines):
+			speaker_label = int(line.split('-')[1])
+			file_name     = line.split('-')[0] # ~/*.wav
+            
+			#speaker_label = int(line.split()[2]) # This is PHQ Binary {0,1}
+			#file_name     = os.path.join(train_path, line.split()[0]+'_AUDIO.wav') # Convert 301 > ~301_AUDIO.wav
+			self.data_label.append(speaker_label)
+			self.data_list.append(file_name)
+
+
+	def __getitem__(self, index):
+		# Read the utterance and randomly select the segment
+		audio, sr = soundfile.read(self.data_list[index])
+		if len(audio.shape) == 2 and audio.shape[1] > 1:
+			audio = audio[:, 0]  # Extract the left channel
+		length = self.num_frames * 160 + 240
+		if audio.shape[0] <= length:
+			shortage = length - audio.shape[0]
+			audio = numpy.pad(audio, (0, shortage), 'wrap')
+		start_frame = numpy.int64(random.random()*(audio.shape[0]-length))
+		audio = audio[start_frame:start_frame + length]
+		audio = numpy.stack([audio],axis=0)
+		# Data Augmentation
+		augtype = random.randint(0,1)
+		if augtype == 0:   # Original
+			audio = audio
+		elif augtype == 1: # Reverberation
+			audio = self.add_rev(audio)
+
+      # Datalabel Binary화하기
+		if self.data_label[index] < 11:
+			label = int(0)
+		elif self.data_label[index] >= 11:
+			label = int(1)
+		else:
+			print('Error')
+		return torch.FloatTensor(audio[0]), label
+
+
+	def __len__(self):
+		return len(self.data_list)
+
+	def add_rev(self, audio):
+		rir_file    = random.choice(self.rir_files)
+		rir, sr     = soundfile.read(rir_file)
+		rir         = numpy.expand_dims(rir.astype(numpy.float64),0)
+		rir         = rir / numpy.sqrt(numpy.sum(rir**2))
+		return signal.convolve(audio, rir, mode='full')[:,:self.num_frames * 160 + 240]
+
+    
+ 
+	
+class validate_loader(object):
+	def __init__(self, validate_list, num_frames, **kwargs):
+		self.num_frames = num_frames
+
+		# Load data & labels
+		self.data_list  = []
+		self.data_label = []
+		lines = open(validate_list).read().splitlines() # Header line 제외
+
+		for index, line in enumerate(lines):
+            
+			speaker_label = int(line.split('-')[1]) # This is PHQ-9 Score
+			file_name     = line.split('-')[0] # ~/*.wav
+			self.data_label.append(speaker_label)
+			self.data_list.append(file_name)
+
+	def __getitem__(self, index):
+		# Read the utterance and randomly select the segment
+		audio, sr = soundfile.read(self.data_list[index])	
+		if len(audio.shape) == 2 and audio.shape[1] > 1:
+			audio = audio[:, 0]  # Extract the left channel	
+		length = self.num_frames * 160 + 240
+		if audio.shape[0] <= length:
+			shortage = length - audio.shape[0]
+			audio = numpy.pad(audio, (0, shortage), 'wrap')
+		start_frame = numpy.int64(random.random()*(audio.shape[0]-length))
+		audio = audio[start_frame:start_frame + length]
+		audio = numpy.stack([audio],axis=0)
+        
+        # Datalabel Binary화하기
+		if self.data_label[index] < 11:
+			label = int(0)
+		elif self.data_label[index] >= 11:
+			label = int(1)
+		else:
+			print('Error')
+            
+		return torch.FloatTensor(audio[0]), label
+
+	def __len__(self):
+		return len(self.data_list)
+    
+
+    
+    
+    
+'''
 import glob, numpy, os, random, soundfile, torch
 from scipy import signal
 
@@ -95,18 +213,18 @@ class train_loader(object):
 		return noise + audio
 	
 class validate_loader(object):
-	def __init__(self, validate_list, validate_path, num_frames, **kwargs):
-		self.train_path = validate_path
+	def __init__(self, validate_list, num_frames, **kwargs):
 		self.num_frames = num_frames
 
 		# Load data & labels
 		self.data_list  = []
 		self.data_label = []
-		lines = open(validate_list).read().splitlines()[1:] # Header line 제외
+		lines = open(validate_list).read().splitlines() # Header line 제외
 
 		for index, line in enumerate(lines):
-			speaker_label = int(line.split()[2]) # This is PHQ Binary {0,1}
-			file_name     = os.path.join(validate_path, line.split()[0]+'_AUDIO.wav') # Convert 301 > ~301_AUDIO.wav
+            
+			speaker_label = int(line.split('-')[1]) # This is PHQ-9 Score
+			file_name     = line.split('-')[0] # ~/*.wav
 			self.data_label.append(speaker_label)
 			self.data_list.append(file_name)
 
@@ -122,7 +240,19 @@ class validate_loader(object):
 		start_frame = numpy.int64(random.random()*(audio.shape[0]-length))
 		audio = audio[start_frame:start_frame + length]
 		audio = numpy.stack([audio],axis=0)
-		return torch.FloatTensor(audio[0]), self.data_label[index]
+        
+        # Datalabel Binary화하기
+		if self.data_label[index] < 11:
+			label = int(0)
+		elif self.data_label[index] >= 10:
+			label = int(1)
+		else:
+			print('Error')
+            
+		return torch.FloatTensor(audio[0]), label
 
 	def __len__(self):
 		return len(self.data_list)
+    
+
+'''
