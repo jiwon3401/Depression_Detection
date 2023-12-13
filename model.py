@@ -19,7 +19,7 @@ class SEModule(nn.Module):
             nn.AdaptiveAvgPool1d(1),
             nn.Conv1d(channels, bottleneck, kernel_size=1, padding=0),
             nn.ReLU(),
-            # nn.BatchNorm1d(bottleneck), # I remove this layer
+            nn.BatchNorm1d(bottleneck), # I remove this layer
             nn.Conv1d(bottleneck, channels, kernel_size=1, padding=0),
             nn.Sigmoid(),
             )
